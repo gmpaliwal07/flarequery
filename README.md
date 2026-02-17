@@ -1,6 +1,6 @@
 # flarequery
 
-The missing query layer for Firebase. Eliminates overfetching, N+1 reads, and ID fan-out in serverless apps — without GraphQL complexity, without migrations, without extra infrastructure.
+The missing query layer for Firebase. Eliminates overfetching, N+1 reads in serverless apps — without GraphQL complexity, without migrations, without extra infrastructure.
 
 ## The Problem
 
