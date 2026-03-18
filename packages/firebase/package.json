@@ -1,6 +1,6 @@
 {
   "name": "@flarequery/firebase",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "main": "./dist/index.cjs",
@@ -28,6 +28,7 @@
     "firebase-functions": "^7.0.5"
   },
   "devDependencies": {
+    "firebase-admin": "^13.7.0",
     "tsup": "^8.5.1",
     "vitest": "^4.0.18"
   }

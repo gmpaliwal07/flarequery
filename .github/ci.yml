@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    name: Typecheck & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Typecheck core
+        run: yarn workspace @flarequery/core run typecheck
+
+      - name: Typecheck firebase
+        run: yarn workspace @flarequery/firebase run typecheck
+
+      - name: Build core
+        run: yarn workspace @flarequery/core run build
+
+      - name: Build firebase
+        run: yarn workspace @flarequery/firebase run build
+
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: ci
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build core
+        run: yarn workspace @flarequery/core run build
+
+      - name: Build firebase
+        run: yarn workspace @flarequery/firebase run build
+
+      - name: Check if @flarequery/firebase version changed
+        id: firebase-version
+        run: |
+          PUBLISHED=$(npm show @flarequery/firebase version 2>/dev/null || echo "0.0.0")
+          LOCAL=$(node -p "require('./packages/firebase/package.json').version")
+          if [ "$PUBLISHED" != "$LOCAL" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish @flarequery/firebase
+        if: steps.firebase-version.outputs.changed == 'true'
+        run: npm publish --access public
+        working-directory: packages/firebase
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: No version changes detected
+        if: steps.firebase-version.outputs.changed == 'false'
+        run: echo "No version bump detected — skipping publish"

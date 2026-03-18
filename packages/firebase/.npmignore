@@ -1,6 +1,12 @@
-src
+src/
+
 *.test.ts
 *.spec.ts
-tsconfig*.json
 vitest.config.ts
+
+tsconfig*.json
+
+tsup.config.*
+
 *.tgz
+.DS_Store
