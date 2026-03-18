@@ -2,12 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src"
+    "paths": {
+      "@flarequery/core": ["../core/src/index.ts"]
+    }
   },
-  "include": [
-    "src/**/*"
-  ],
-  "references": [
-    { "path": "../core/tsconfig.build.json" }
-  ]
+  "include": ["src/**/*"]
 }

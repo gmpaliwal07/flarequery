@@ -1,8 +1,7 @@
-import { ModelDefinition, QueryContext } from "@flarequery/core";
+import { buildExecutionPlan, executeplan, FlareResponse, ModelDefinition, parseQuery, QueryContext } from "@flarequery/core";
 import { Auth } from "firebase-admin/auth";
 import { Firestore } from "firebase-admin/firestore";
 import { createFirestoreAdapter } from "./adapter.js";
-import { CollectionReference, createCollectionRef } from "./builder.js";
 
 export interface ServerlessAppOptions {
     firestore: Firestore;
@@ -10,28 +9,38 @@ export interface ServerlessAppOptions {
 }
 
 export interface ServerlessApp {
-    model(name: string, definition: ModelDefinition): void;
+    model(name: string, definition: ModelDefinition): void
 
-    collection(name: string): CollectionReference;
+    execute(query: string, ctx: QueryContext): Promise<FlareResponse>
 }
 
 export function createServerlessApp(options: ServerlessAppOptions): ServerlessApp {
-    const { firestore } = options;
+    const { firestore, auth: firebaseAuth } = options
 
-    const models = new Map<string, ModelDefinition>();
-    const adapter = createFirestoreAdapter(firestore);
+    const models = new Map<string, ModelDefinition>()
+
+
+    const adapter = createFirestoreAdapter(firestore)
 
     return {
         model(name, definition) {
             if (models.has(name)) {
-                console.warn(`[FlareQuery] model '${name}' is already registered — skipping duplicate registration`);
+                throw new Error(`model '${name}' is already registered`)
             }
-            models.set(name, definition);
+            models.set(name, definition)
         },
-        collection(name) {
-            return createCollectionRef(name, models, adapter);
+
+        async execute(query, ctx) {
+            // parse
+            const queryNode = parseQuery(query)
+
+            // plan 
+            const plan = buildExecutionPlan(queryNode, models, ctx)
+
+            // execute 
+            return executeplan(plan, adapter)
         },
-    };
+    }
 }
 
 export async function extractContext(
@@ -39,21 +48,19 @@ export async function extractContext(
     auth: Auth
 ): Promise<QueryContext> {
     if (authorization === undefined || !authorization.startsWith("Bearer ")) {
-        return { userId: null, token: null };
+        return { userId: null, token: null }
     }
 
-    const idToken = authorization.slice("Bearer ".length);
+    const idToken = authorization.slice("Bearer ".length)
 
     try {
-        const decoded = await auth.verifyIdToken(idToken);
+        const decoded = await auth.verifyIdToken(idToken)
         return {
             userId: decoded.uid,
             token: decoded as unknown as Record<string, unknown>,
-        };
-    } catch (err) {
-        console.warn("[FlareQuery] extractContext: token verification failed —",
-            err instanceof Error ? err.message : "unknown error"
-        );
-        return { userId: null, token: null };
+        }
+    } catch {
+        // invalid or expired token 
+        return { userId: null, token: null }
     }
 }

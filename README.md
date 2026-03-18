@@ -1,125 +1,235 @@
 # flarequery
 
-**Declarative, field-mask-aware data fetching for Firestore.**  
-Stop paying for fields you never read.
-
-[![npm version](https://img.shields.io/npm/v/@flarequery/firebase.svg)](https://www.npmjs.com/package/@flarequery/firebase)
-[![license](https://img.shields.io/npm/l/@flarequery/firebase.svg)](./LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](https://www.typescriptlang.org/)
+The missing query layer for Firebase. Eliminates overfetching and N+1 reads in serverless apps — no GraphQL, no migrations, no extra infrastructure.
 
 ---
 
-## The Problem
-
-Every Firestore fetch returns the **entire document** — whether you asked for 2 fields or 20. You pay for all of them.
-
-FlareQuery lets you declare exactly what you need. It builds field masks, resolves relations in parallel, and returns only what was asked for.
-
----
-
-## Install
+## Installation
 
 ```bash
-yarn add @flarequery/firebase
+npm install @flarequery/firebase firebase-admin
 ```
-
-> Node 18+, firebase-admin ≥11, firebase-functions ≥4
 
 ---
 
-## Quick Start
+## Setup
 
 ```ts
-import { createServerlessApp, one, many } from "@flarequery/firebase";
+import { initializeApp } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
+import { createServerlessApp } from "@flarequery/firebase";
+
+const admin = initializeApp();
+const db = getFirestore();
+const auth = getAuth();
 
 const app = createServerlessApp({ firestore: db, auth });
+```
 
-app.model("Product", {
-  source: { path: "products" },
+---
+
+## Define Models
+
+```ts
+app.model("Event", {
+  source: db.collection("events"),
+  fields: {
+    title: "string",
+    description: "string",
+    participants: {
+      relation: {
+        from: "rsvpUserIds",
+        to: "User",
+        type: "many",
+      },
+      select: ["name", "email"],
+    },
+  },
+});
+
+app.model("User", {
+  source: db.collection("users"),
   fields: {
     name: "string",
-    price: "number",
-    category: one("Category", { from: "categoryId", select: ["name"] }),
-    tags: many("Tag", { from: "tagIds", select: ["label"] }),
+    email: "string",
   },
-  auth: (ctx) => ctx.userId !== null,
 });
 ```
 
-```ts
-const response = await app
-  .collection("Product")
-  .doc("prod_abc")
-  .select("name", "price", "category.name")
-  .get(ctx);
-
-// response.data → { name: "...", price: 299, category: { name: "Cameras" } }
-```
-
-Relations resolved in parallel. Only declared fields hit the wire.
-
----
-
-## Cloud Function
+**Relation types:**
 
 ```ts
-export const query = createOnRequest(app, getAuth(), { cors: true });
-```
+// one-to-one
+author: {
+  relation: { from: "authorId", to: "User", type: "one" },
+  select: ["name"],
+}
 
-```json
-POST /query
-Authorization: Bearer <firebase_id_token>
-
-{ "model": "Product", "id": "prod_abc", "select": ["name", "price", "category.name"] }
-```
-
-```json
-{
-  "data": { "name": "EOS R5", "price": 3899, "category": { "name": "Cameras" } }
+// one-to-many
+participants: {
+  relation: { from: "rsvpUserIds", to: "User", type: "many" },
+  select: ["name", "email"],
 }
 ```
-
-Gen 1: `createFunction` — Gen 2: `createOnRequest`
 
 ---
 
 ## Auth
 
-```ts
-import { extractContext } from "@flarequery/firebase";
+Auth rules run before any read. Return `false` to block the entire branch.
 
-const ctx = await extractContext(req.headers.authorization, auth);
-// { userId: string | null, token: DecodedIdToken | null }
+```ts
+app.model("Event", {
+  source: db.collection("events"),
+  fields: { title: "string" },
+  auth: (ctx) => ctx.userId !== null,
+});
 ```
 
-Auth rules run before any Firestore read. Unauthorized access throws a `PlanError`.
+---
+
+## Deploy
+
+```ts
+import { createOnRequest } from "@flarequery/firebase";
+
+// Gen 2 (recommended)
+export const query = createOnRequest(app, auth);
+
+// Gen 1
+export const query = createFunction(app, auth);
+```
 
 ---
 
-## Field Types
+## Querying
 
-| Type                | Usage                                   |
-| ------------------- | --------------------------------------- |
-| `"string"`          | Scalar string                           |
-| `"number"`          | Scalar number                           |
-| `"boolean"`         | Scalar boolean                          |
-| `"timestamp"`       | Firestore Timestamp                     |
-| `one(model, opts)`  | Single related document via foreign key |
-| `many(model, opts)` | Multiple related documents via ID array |
+### Server-side (inside a Cloud Function)
+
+```ts
+const result = await app.execute(
+  `
+  query {
+    Event(id: "event_1") {
+      title
+      participants {
+        name
+      }
+    }
+  }
+`,
+  { userId: req.user.uid, token: null },
+);
+```
+
+### HTTP (curl)
+
+```bash
+curl -X POST https://us-central1-your-project.cloudfunctions.net/query \
+  -H 'Authorization: Bearer <firebase-id-token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "query { Event(id: \"event_1\") { title participants { name email } } }"}'
+```
+
+### Next.js API Route
+
+```ts
+// app/api/event/route.ts
+export async function GET(req: Request) {
+  const token = req.headers.get("authorization") ?? "";
+
+  const res = await fetch(
+    "https://us-central1-your-project.cloudfunctions.net/query",
+    {
+      method: "POST",
+      headers: { Authorization: token, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `
+          query {
+            Event(id: "event_1") {
+              title
+              participants { name email }
+            }
+          }
+        `,
+      }),
+    },
+  );
+
+  return Response.json(await res.json());
+}
+```
+
+### React Client
+
+```ts
+// lib/flarequery.ts
+export async function flareFetch(query: string, idToken: string) {
+  const res = await fetch(
+    "https://us-central1-your-project.cloudfunctions.net/query",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query }),
+    },
+  );
+
+  if (!res.ok) throw new Error(`flarequery error: ${res.status}`);
+  return res.json();
+}
+```
+
+```tsx
+// components/EventPage.tsx
+import { useEffect, useState } from "react";
+import { getAuth } from "firebase/auth";
+import { flareFetch } from "@/lib/flarequery";
+
+export function EventPage({ eventId }: { eventId: string }) {
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    async function load() {
+      const token = await getAuth().currentUser?.getIdToken();
+      if (!token) return;
+
+      const result = await flareFetch(
+        `query { Event(id: "${eventId}") { title participants { name } } }`,
+        token,
+      );
+      setData(result.data);
+    }
+    load();
+  }, [eventId]);
+
+  if (!data) return <div>loading...</div>;
+
+  return (
+    <div>
+      <h1>{data.title}</h1>
+      {data.participants.map((p, i) => (
+        <div key={i}>{p.name}</div>
+      ))}
+    </div>
+  );
+}
+```
 
 ---
 
-## Error Handling
+## Packages
 
-| Class            | When                                              |
-| ---------------- | ------------------------------------------------- |
-| `PlanError`      | Invalid model, unknown field, unauthorized access |
-| `ExecutionError` | Runtime — missing doc, unresolvable ref           |
-
-`ExecutionError`s surface in `response.errors[]` — partial data is still returned.
+| Package | Usage |
+|---|---|
+| `@flarequery/firebase` | Install this |
+| `@flarequery/core` | Internal — do not import directly |
 
 ---
 
 ## License
 
-MIT © Gaurav Paliwal
+MIT

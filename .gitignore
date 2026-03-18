@@ -1,37 +1,9 @@
-# Dependencies
-node_modules/
-.yarn/cache
-.yarn/unplugged
-.yarn/build-state.yml
-.yarn/install-state.gz
-
-# Build outputs
-dist/
+node_modules
+dist
 *.tgz
-
-# TypeScript
-*.tsbuildinfo
-
-# Environment
 .env
 .env.local
-.env.*.local
-
-# Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
+serviceAccount.json
+*firebase-adminsdk*.json
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Test coverage
-coverage/
+.DS_Store
