@@ -1,5 +1,9 @@
-import { Firestore } from "firebase-admin/firestore";
-import { FirestoreAdapter, DocumentSnapshot } from '@flarequery/core';
+import {
+    Firestore,
+    DocumentSnapshot as FirestoreSnapshot,
+    Query as FirestoreQuery,
+} from "firebase-admin/firestore"
+import { FirestoreAdapter, DocumentSnapshot } from "@flarequery/core"
 
 const FIRESTORE_GETALL_LIMIT = 300
 
@@ -7,9 +11,7 @@ export function createFirestoreAdapter(db: Firestore): FirestoreAdapter {
     return {
         async getOne(collection, id, fieldMask) {
             const ref = db.collection(collection).doc(id)
-
             const snapshot = await ref.get()
-
             return adaptSnapshot(snapshot, fieldMask)
         },
 
@@ -21,17 +23,46 @@ export function createFirestoreAdapter(db: Firestore): FirestoreAdapter {
             const chunkResults = await Promise.all(
                 chunks.map((chunk) => {
                     const refs = chunk.map((id) => db.collection(collection).doc(id))
-            
                     return db.getAll(...refs, { fieldMask })
                 })
             )
 
-            return chunkResults.flat().map((snap) => adaptSnapshot(snap, fieldMask))
+            return chunkResults
+                .flat()
+                .map((snap: FirestoreSnapshot) => adaptSnapshot(snap, fieldMask))
+        },
+
+        async getCollection(collection, filters, fieldMask, orderBy, limit) {
+            let query: FirestoreQuery = db.collection(collection)
+
+            for (const filter of filters) {
+                query = query.where(
+                    filter.field,
+                    filter.operator,
+                    filter.value
+                )
+            }
+
+            if (orderBy !== undefined) {
+                query = query.orderBy(orderBy.field, orderBy.direction)
+            }
+
+            if (limit !== undefined) {
+                query = query.limit(limit)
+            }
+            if (fieldMask.length > 0) {
+                query = query.select(...fieldMask)
+            }
+
+            const snapshot = await query.get()
+
+            return snapshot.docs.map((snap) => adaptSnapshot(snap, fieldMask))
         },
     }
 }
+
 function adaptSnapshot(
-    snap: FirebaseFirestore.DocumentSnapshot,
+    snap: FirebaseFirestore.DocumentSnapshot<FirebaseFirestore.DocumentData>,
     fieldMask: string[]
 ): DocumentSnapshot {
     return {

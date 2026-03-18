@@ -1,19 +1,43 @@
-import { DependentRelation, ExecutionOp, ExecutionPlan, FlareResponse, FlareResult, GetManyOp, GetOneOp } from "../types.js";
+import {
+    CollectionExecutionPlan,
+    DependentRelation,
+    ExecutionOp,
+    ExecutionPlan,
+    FlareCollectionResponse,
+    FlareResponse,
+    FlareResult,
+    GetManyOp,
+    GetOneOp,
+    WhereClause,
+} from "../types.js"
 
 export interface DocumentSnapshot {
-    id: string;
-    exists: boolean;
-    data(): Record<string, unknown> | undefined;
+    id: string
+    exists: boolean
+    data(): Record<string, unknown> | undefined
 }
 
 export interface FirestoreAdapter {
+    getOne(
+        collection: string,
+        id: string,
+        fieldMask: string[]
+    ): Promise<DocumentSnapshot>
 
-    getOne(collection: string, id: string, fieldMask: string[]): Promise<DocumentSnapshot>
+    getMany(
+        collection: string,
+        ids: string[],
+        fieldMask: string[]
+    ): Promise<DocumentSnapshot[]>
 
-    getMany(collection: string, ids: string[], fieldMask: string[]): Promise<DocumentSnapshot[]>
-
+    getCollection(
+        collection: string,
+        filters: WhereClause[],
+        fieldMask: string[],
+        orderBy?: { field: string; direction: "asc" | "desc" },
+        limit?: number
+    ): Promise<DocumentSnapshot[]>
 }
-
 
 export class ExecutionError extends Error {
     constructor(message: string) {
@@ -148,14 +172,68 @@ async function executeOp(
 
 // public API
 
-export async function executeplan(plan: ExecutionPlan,
-    adapter: FirestoreAdapter): Promise<FlareResponse> {
+export async function executePlan(
+    plan: ExecutionPlan,
+    adapter: FirestoreAdapter
+): Promise<FlareResponse> {
     try {
-        const data = await executeOp(plan.root, null, adapter);
+        const data = await executeOp(plan.root, null, adapter)
         return { data }
     } catch (err) {
         if (err instanceof ExecutionError) {
             return { data: null, errors: [err.message] }
+        }
+        throw err
+    }
+}
+async function resolveCollectionDoc(
+    snap: DocumentSnapshot,
+    plan: CollectionExecutionPlan,
+    adapter: FirestoreAdapter
+): Promise<FlareResult | null> {
+    if (!snap.exists) return null
+
+    const docData = snap.data()
+    if (docData === undefined) return null
+
+    const result = await resolveDependents(plan.dependents, docData, adapter)
+
+    const foreignKeys = new Set(plan.dependents.map((d) => d.foreignKey))
+
+    for (const [key, value] of Object.entries(docData)) {
+        if (!foreignKeys.has(key) && plan.fieldMask.includes(key)) {
+            result[key] = value
+        }
+    }
+
+    result.__id = snap.id
+
+    return result
+}
+
+export async function executeCollectionPlan(
+    plan: CollectionExecutionPlan,
+    adapter: FirestoreAdapter
+): Promise<FlareCollectionResponse> {
+    try {
+        const snapshots = await adapter.getCollection(
+            plan.collection,
+            plan.filters,
+            plan.fieldMask,
+            plan.orderBy,
+            plan.limit
+        )
+
+        const results = await Promise.all(
+            snapshots.map((snap) => resolveCollectionDoc(snap, plan, adapter))
+        )
+
+        const data = results.filter((r): r is FlareResult => r !== null)
+
+        return { data }
+    } catch (err) {
+        if (err instanceof ExecutionError) {
+            return { data: [], errors: [err.message] }
         }
         throw err
     }
