@@ -234,17 +234,6 @@ Authorization: Bearer <token>
 }
 ```
 
----
-
-## How It Works
-
-**Planner** — converts your `.select()` and `.filter()` calls into an `ExecutionPlan`. Validates model schema and auth rules at this stage — zero I/O.
-
-**Executor** — walks the plan. All relation fetches run via `Promise.all`. Uses `getAll` for batch fetches with automatic 300-doc chunking. Only declared fields are requested from Firestore.
-
-**Adapter** — thin wrapper around Firebase Admin SDK. Swappable for testing.
-
----
 
 ## License
 
