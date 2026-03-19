@@ -73,6 +73,7 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
+          
       - name: Publish @flarequery/firebase
         if: steps.firebase-version.outputs.changed == 'true'
         run: npm publish --access public
